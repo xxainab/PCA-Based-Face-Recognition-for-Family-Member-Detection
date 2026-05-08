@@ -1,68 +1,169 @@
-
 import cv2
-import numpy as np
 import pickle
-import os
+import numpy as np
 
 IMG_SIZE = 100
-# TUNE THIS: Based on the distance printed in your console
-THRESHOLD = 65
-# Load Models
-with open("models/pca_model.pkl", "rb") as f: pca = pickle.load(f)
-with open("models/knn_model.pkl", "rb") as f: knn = pickle.load(f)
-with open("models/labels.pkl", "rb") as f: label_map = pickle.load(f)
 
-face_cascade = cv2.CascadeClassifier("haarcascade_frontalface_default.xml")
+# =========================
+# LOAD MODELS
+# =========================
+
+with open(
+    "models/person_models.pkl",
+    "rb"
+) as f:
+
+    models = pickle.load(f)
+
+# =========================
+# FACE DETECTOR
+# =========================
+
+face_cascade = cv2.CascadeClassifier(
+    "haarcascade_frontalface_default.xml"
+)
+
+# =========================
+# CAMERA
+# =========================
+
 cap = cv2.VideoCapture(0)
 
-print("Starting Robot Vision... Press 'q' to quit.")
+THRESHOLD = 8000
+
+print("\n====================================")
+print(" PCA FACE RECOGNITION STARTED")
+print(" Press Q to Quit")
+print("====================================\n")
 
 while True:
+
     ret, frame = cap.read()
-    if not ret: break
 
-    frame = cv2.flip(frame, 1)
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    gray_equalized = cv2.equalizeHist(gray)
+    if not ret:
+        break
 
-    faces = face_cascade.detectMultiScale(gray_equalized, 1.2, 5, minSize=(100, 100))
+    gray = cv2.cvtColor(
+        frame,
+        cv2.COLOR_BGR2GRAY
+    )
 
-    for (x, y, w, h) in faces:
-        # 1. Preprocess (MUST match train.py)
-        face_roi = gray_equalized[y:y+h, x:x+w]
-        face_resized = cv2.resize(face_roi, (IMG_SIZE, IMG_SIZE))
-        face_resized = cv2.equalizeHist(face_resized)
-        
-        # Z-Score Normalization
-        face_norm = face_resized.astype(np.float32)
-        face_norm = (face_norm - np.mean(face_norm)) / (np.std(face_norm) + 1e-5)
-        
-        face_vector = face_norm.flatten().reshape(1, -1)
+    gray = cv2.equalizeHist(gray)
 
-        # 2. Project and Calculate Distance
-        face_pca = pca.transform(face_vector)
-        dist, ind = knn.kneighbors(face_pca, n_neighbors=1)
-        distance_val = dist[0][0]
+    faces = face_cascade.detectMultiScale(
+        gray,
+        scaleFactor=1.2,
+        minNeighbors=6,
+        minSize=(80, 80)
+    )
 
-        # 3. Decision Logic (This is where person_name is defined)
-        if distance_val < THRESHOLD:
-            prediction = knn.predict(face_pca)
-            person_name = label_map[prediction[0]]
-            color = (0, 255, 0) # Green for Family
-        else:
-            person_name = "Unknown"
-            color = (0, 0, 255) # Red for Unknown
+    if len(faces) > 0:
 
-        # 4. DEBUG: Now person_name exists, so we can print it safely
-        print(f"DEBUG -> Name: {person_name} | Distance: {int(distance_val)}")
-        
-        # 5. UI Feedback
-        cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
-        cv2.putText(frame, f"{person_name} ({int(distance_val)})", (x, y-10), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+        faces = sorted(
+            faces,
+            key=lambda f: f[2] * f[3],
+            reverse=True
+        )
 
-    cv2.imshow("Robot Vision", frame)
-    if cv2.waitKey(1) & 0xFF == ord('q'): break
+        x, y, w, h = faces[0]
+
+        face = gray[y:y+h, x:x+w]
+
+        face = cv2.resize(
+            face,
+            (IMG_SIZE, IMG_SIZE)
+        )
+
+        face = cv2.equalizeHist(face)
+
+        vec = face.flatten()
+
+        # =========================
+        # COMPARE WITH ALL MODELS
+        # =========================
+
+        best_person = "Unknown"
+        best_error = float('inf')
+
+        for person_name, model in models.items():
+
+            pca = model["pca"]
+
+            projected = pca.transform(
+                vec.reshape(1, -1)
+            )
+
+            reconstructed = pca.inverse_transform(
+                projected
+            )
+
+            error = np.linalg.norm(
+                vec - reconstructed
+            )
+
+            print(
+                f"{person_name} Error: "
+                f"{error:.1f}"
+            )
+
+            if error < best_error:
+
+                best_error = error
+                best_person = person_name
+
+        # =========================
+        # UNKNOWN DETECTION
+        # =========================
+
+        if best_error > THRESHOLD:
+
+            best_person = "Unknown"
+
+        print(
+            f"\nPrediction: {best_person} "
+            f"| Error: {best_error:.1f}\n"
+        )
+
+        # =========================
+        # DRAW
+        # =========================
+
+        cv2.rectangle(
+            frame,
+            (x, y),
+            (x+w, y+h),
+            (0, 255, 0),
+            2
+        )
+
+        cv2.putText(
+            frame,
+            f"{best_person}",
+            (x, y-10),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1,
+            (0, 255, 0),
+            2
+        )
+
+        cv2.putText(
+            frame,
+            f"Err: {best_error:.0f}",
+            (x, y+h+30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (255, 0, 0),
+            2
+        )
+
+    cv2.imshow(
+        "PCA Face Recognition",
+        frame
+    )
+
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
 
 cap.release()
+
 cv2.destroyAllWindows()
