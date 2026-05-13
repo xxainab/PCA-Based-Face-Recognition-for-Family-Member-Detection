@@ -244,7 +244,7 @@ print("\n====================================")
 print(" TEST SET EVALUATION")
 print("====================================\n")
 
-THRESHOLD = 8000
+THRESHOLD = 7000
 
 overall_correct = 0
 overall_total = 0

@@ -29,7 +29,7 @@ face_cascade = cv2.CascadeClassifier(
 
 cap = cv2.VideoCapture(0)
 
-THRESHOLD = 8000
+THRESHOLD = 5000
 
 print("\n====================================")
 print(" PCA FACE RECOGNITION STARTED")
